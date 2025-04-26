@@ -1,83 +1,88 @@
+from flask import Flask, request, jsonify
 import boto3
-import uuid
-import time
+import mysql.connector
 import json
+import re
+import uuid
 
-# Seed URLs to crawl
-seed_urls = [
-    "https://www.python.org/",
-#    "https://www.wikipedia.org/",
-#    "https://www.example.com/"
-]
+app = Flask(__name__)
 
-# Initialize SQS client
-sqs = boto3.client('sqs', region_name='eu-north-1')  # Set the correct region
-queue_url = 'https://sqs.eu-north-1.amazonaws.com/441832714601/TaskQueue.fifo'
-master_queue_url = 'https://sqs.eu-north-1.amazonaws.com/441832714601/MasterQueue.fifo'
+# AWS Setup
+sqs = boto3.client('sqs', region_name='eu-north-1')
+task_queue_url = 'https://sqs.eu-north-1.amazonaws.com/441832714601/TaskQueue.fifo'
 
+# Helpers
+def adjust_url(url):
+    if not url.startswith('http'):
+        url = 'https://' + url
+    return url
 
-def main():
-    print("[MASTER] Starting task dispatch...")
+def is_valid_url(string):
+    url_pattern = re.compile(r'^(https?://)?([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(/.*)?$')
+    return bool(url_pattern.match(string))
 
-    for url in seed_urls:
-        print(f"[MASTER] Dispatching crawl task: {url}")
-        sqs.send_message(
-            QueueUrl=queue_url,
-            MessageBody=json.dumps({"url": url, "depth": 0}),
-            MessageGroupId='1',
-            MessageDeduplicationId=url  # Optional: Use URL to ensure deduplication
+# Routes
+@app.route('/api/search', methods=['GET'])
+def search_keyword():
+    keyword = request.args.get('keyword', '').strip().lower()
+    if not keyword:
+        return jsonify({'error': 'Keyword is required'}), 400
+
+    try:
+        # Fresh MySQL connection
+        db = mysql.connector.connect(
+            host="172.31.28.123",
+            user="Admin",
+            password="1234",
+            database="INDEXER"
         )
+        db_cursor = db.cursor()
 
-    print("[MASTER] Finished dispatching all tasks.")
+        sql = "SELECT urls FROM keyword_index WHERE keyword = %s"
+        db_cursor.execute(sql, (keyword,))
+        row = db_cursor.fetchone()
 
-    # Start receiving URLs from the Crawler Nodes (via the Master Queue)
-    receive_urls_from_crawler()
-
-def receive_urls_from_crawler():
-    while True:
-        print("[MASTER] Waiting for URLs from Crawler Nodes...")
-
-        # Poll the master queue for URLs that were extracted by Crawler Nodes
-        response = sqs.receive_message(
-            QueueUrl=master_queue_url,
-            MaxNumberOfMessages=10,
-            WaitTimeSeconds=10  # Long polling for better efficiency
-        )
-
-        if 'Messages' in response:
-            for message in response['Messages']:
-
-                raw_body = message['Body']
-                body = json.loads(raw_body)  # Parse JSON string into Python dict
-                extracted_url = body.get('url')
-                extracted_depth = body.get('depth', 0)
-
-                print(f"[MASTER] Received extracted URL from Crawler: {extracted_url} at depth {extracted_depth}")
-
-                # Process the URL (you can decide what to do with it, e.g., send more tasks)
-                # For now, let's just print the URL and reassign it to Crawler if needed
-                assign_url_to_crawler(extracted_url, extracted_depth)
-
-                # Delete the message from the queue after processing
-                sqs.delete_message(
-                    QueueUrl=master_queue_url,
-                    ReceiptHandle=message['ReceiptHandle']
-                )
+        if row:
+            urls_json = row[0]
+            urls = json.loads(urls_json)
+            return jsonify({'keyword': keyword, 'urls': urls})
         else:
-                print("[MASTER] No messages received from Crawler.")
+            return jsonify({'keyword': keyword, 'urls': []})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        try:
+            db_cursor.close()
+            db.close()
+        except:
+            pass
 
-        time.sleep(1)  # Poll every 5 seconds
+@app.route('/api/crawl', methods=['POST'])
+def submit_url():
+    data = request.get_json()
+    url = data.get('url', '').strip()
+    max_depth = data.get('max_depth', 2)
 
-def assign_url_to_crawler(url, depth):
-    print(f"[MASTER] Reassigning URL to Crawler for further crawling: {url}")
-    # Reassign the URL to the Crawler Node (task assignment)
-    sqs.send_message(
-        QueueUrl=queue_url,
-        MessageBody=json.dumps({"url": url, "depth": depth}),
-        MessageGroupId='1',  # FIFO Queue requires MessageGroupId
-        MessageDeduplicationId=str(uuid.uuid5(uuid.NAMESPACE_DNS, url))  # Deduplication based on URL
-    )
+    try:
+        max_depth = int(max_depth)
+    except ValueError:
+        max_depth = 2
 
+    if not url or not is_valid_url(url):
+        return jsonify({'error': 'Invalid URL'}), 400
+
+    url = adjust_url(url)
+
+    try:
+        sqs.send_message(
+            QueueUrl=task_queue_url,
+            MessageBody=json.dumps({"url": url, "depth": 0, "max_depth": max_depth}),
+            MessageGroupId='1',
+            MessageDeduplicationId=str(uuid.uuid5(uuid.NAMESPACE_DNS, url))
+        )
+        return jsonify({'message': f"URL '{url}' submitted for crawling with max depth {max_depth}."}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == "__main__":
-    main()
+    app.run(host='0.0.0.0', port=5000, debug=True)
