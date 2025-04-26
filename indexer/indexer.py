@@ -10,7 +10,7 @@ import uuid
 
 # Initialize SQS client
 sqs = boto3.client('sqs', region_name='eu-north-1')  # Set the correct region
-indexer_queue_url = '....' # This will have the url removed for secuirty reasons
+indexer_queue_url = 'https://sqs.eu-north-1.amazonaws.com/441832714601/IndexerQueue.fifo'
 
 # Initialize Elasticsearch client
 es = Elasticsearch(
