@@ -1,13 +1,12 @@
 import subprocess
 import boto3
-from elasticsearch import Elasticsearch
-from config import ELASTICSEARCH_HOST
 import mysql.connector
 import threading
 import time
 import uuid
 import requests
 import socket
+from bs4 import BeautifulSoup
 
 # Constants
 MASTER_API = "http://172.31.21.118:5000"
@@ -34,15 +33,9 @@ thread_status_map = {}  # thread_name -> status
 lock = threading.Lock()
 stop_event = threading.Event()
 
-# AWS SQS & Elasticsearch setup
+# AWS SQS setup
 sqs = boto3.client('sqs', region_name='eu-north-1')
 indexer_queue_url = 'https://sqs.eu-north-1.amazonaws.com/441832714601/IndexerQueue.fifo'
-
-es = Elasticsearch(
-    ELASTICSEARCH_HOST,
-    api_key=None,
-    headers={"accept": "application/json", "Content-Type": "application/json"}
-)
 
 # MySQL setup
 db = mysql.connector.connect(
@@ -72,14 +65,12 @@ def send_heartbeat():
             print(f"[INDEXER] Heartbeat failed: {e}")
         time.sleep(2)
 
-# Load existing index
-def load_index():
-    index = {}
-    db_cursor.execute("SELECT url, content, indexed_obj_id FROM indexed_pages")
-    for url, content, indexed_obj_id in db_cursor.fetchall():
-        index[url] = (content, {'_id': indexed_obj_id})
-    print("[INDEXER] Index loaded from database.")
-    return index
+# Clean HTML
+def clean_html(html):
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style"]):
+        tag.decompose()
+    return soup.get_text(separator=" ", strip=True)
 
 # Worker logic
 def process_message(index):
@@ -104,16 +95,15 @@ def process_message(index):
             try:
                 data = eval(message['Body'])  # ⚠️ Replace in production
                 url = data.get('url')
-                content = data.get('text')
+                raw_html = data.get('text')
 
-                if url and content:
+                if url and raw_html:
                     with lock:
                         thread_status_map[thread_name] = f"Indexing {url}"
 
-                    indexed_obj = es.index(index="webpages", document={"url": url, "content": content})
+                    cleaned_text = clean_html(raw_html)
 
                     with lock:
-                        index[url] = (content, indexed_obj)
                         urls_indexed += 1
 
                     sql = """
@@ -123,7 +113,7 @@ def process_message(index):
                             content = VALUES(content),
                             indexed_obj_id = VALUES(indexed_obj_id)
                     """
-                    db_cursor.execute(sql, (url, content, indexed_obj['_id']))
+                    db_cursor.execute(sql, (url, cleaned_text, "dummy-id"))
                     db.commit()
 
                 sqs.delete_message(
@@ -144,6 +134,11 @@ def process_message(index):
 def index_worker(index):
     while not stop_event.is_set():
         process_message(index)
+
+# Load index (not used now)
+def load_index():
+    print("[INDEXER] No local content index loaded (using DB only).")
+    return {}
 
 # Entry point
 def main():
