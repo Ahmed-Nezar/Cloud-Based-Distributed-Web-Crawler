@@ -2,7 +2,7 @@ from flask import Flask, request, render_template_string, jsonify
 import requests
 
 app = Flask(__name__)
-MASTER_SERVER = "http://13.51.174.175:5000"
+MASTER_SERVER = "http://56.228.15.200:5000"
 
 # In-memory store to track previous URL count
 prev_url_counts = {}
