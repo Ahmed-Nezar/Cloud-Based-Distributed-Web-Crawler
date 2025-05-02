@@ -34,7 +34,7 @@ def get_db():
         database="INDEXER"
     )
 
-# ================= HEARTBEAT =================
+# ================= 🔁 HEARTBEAT =================
 @app.route('/api/heartbeat', methods=['POST'])
 def receive_heartbeat():
     data = request.get_json()
@@ -73,7 +73,7 @@ def receive_heartbeat():
         cursor.close()
         db.close()
 
-# ================= STATUS =================
+# ================= 📊 STATUS =================
 @app.route('/api/status', methods=['GET'])
 def get_status():
     detailed = request.args.get("detailed", "false").lower() == "true"
@@ -95,7 +95,7 @@ def get_status():
             ip = row["ip"]
             time_diff = (now - last_seen_db).total_seconds()
 
-            status = "idle" if time_diff <= 10 else "not active"
+            status = "idle" if time_diff <= 5 else "not active"
 
             item = {
                 "node_id": node_id,
@@ -120,7 +120,21 @@ def get_status():
         cursor.close()
         db.close()
 
-# ================= SEARCH (TF-IDF) =================
+# Crawler-1 status update
+@app.route("/api/crawler1-status", methods=["GET"])
+def crawler1_status():
+    try:
+        for node_id, info in last_known_counts.items():
+            if "ip-172-31-29-60" in node_id.lower():  # or some known name
+                time_diff = (datetime.utcnow() - info["last_seen"]).total_seconds()
+                if time_diff <= 4:
+                    return jsonify({"active": True})
+                else:
+                    return jsonify({"active": False})
+        return jsonify({"active": False})
+    except:
+        return jsonify({"active": False})
+# ================= 🔎 SEARCH (TF-IDF) =================
 @app.route('/api/search', methods=['GET'])
 def search_keyword():
     query = request.args.get('keyword', '').strip().lower()
@@ -167,7 +181,7 @@ def search_keyword():
         cursor.close()
         db.close()
 
-# ================= CRAWL =================
+# ================= 🌐 CRAWL =================
 def adjust_url(url):
     if not url.startswith('http'):
         url = 'https://' + url
@@ -204,7 +218,7 @@ def submit_url():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ================= HEALTH =================
+# ================= 🩺 HEALTH =================
 @app.route('/ping', methods=['GET'])
 def ping():
     return "pong", 200
