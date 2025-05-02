@@ -4,26 +4,27 @@ import mysql.connector
 import json
 import re
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
+
+# NLP & TF-IDF
+import nltk
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
+nltk.download('punkt')
+nltk.download('stopwords')
+stop_words = set(stopwords.words('english'))
 
 app = Flask(__name__)
 
-# AWS SQS Setup (still used for crawl endpoint)
+# AWS SQS Setup
 sqs = boto3.client('sqs', region_name='eu-north-1')
 task_queue_url = 'https://sqs.eu-north-1.amazonaws.com/441832714601/TaskQueue.fifo'
 
-# In-memory cache for url_count tracking
+# Local heartbeat cache
 last_known_counts = {}
-
-# --- Helpers ---
-def adjust_url(url):
-    if not url.startswith('http'):
-        url = 'https://' + url
-    return url
-
-def is_valid_url(string):
-    url_pattern = re.compile(r'^(https?://)?([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(/.*)?$')
-    return bool(url_pattern.match(string))
 
 def get_db():
     return mysql.connector.connect(
@@ -33,7 +34,7 @@ def get_db():
         database="INDEXER"
     )
 
-# ========== 🔁 HEARTBEAT ==========
+# ================= HEARTBEAT =================
 @app.route('/api/heartbeat', methods=['POST'])
 def receive_heartbeat():
     data = request.get_json()
@@ -49,7 +50,6 @@ def receive_heartbeat():
     try:
         db = get_db()
         cursor = db.cursor()
-
         cursor.execute("""
             INSERT INTO heartbeat (node_id, role, ip, last_seen, url_count)
             VALUES (%s, %s, %s, NOW(), %s)
@@ -58,10 +58,8 @@ def receive_heartbeat():
                 ip = VALUES(ip),
                 url_count = VALUES(url_count)
         """, (node_id, role, ip, url_count))
-
         db.commit()
 
-        # Update local cache for tracking
         last_known_counts[node_id] = {
             "url_count": url_count,
             "last_seen": datetime.utcnow(),
@@ -72,13 +70,10 @@ def receive_heartbeat():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
-        try:
-            cursor.close()
-            db.close()
-        except:
-            pass
+        cursor.close()
+        db.close()
 
-# ========== 📊 STATUS ==========
+# ================= STATUS =================
 @app.route('/api/status', methods=['GET'])
 def get_status():
     detailed = request.args.get("detailed", "false").lower() == "true"
@@ -100,20 +95,7 @@ def get_status():
             ip = row["ip"]
             time_diff = (now - last_seen_db).total_seconds()
 
-            # Default fallback
-            status = "not active"
-
-            if time_diff <= 10:
-                cached = last_known_counts.get(node_id)
-                if cached:
-                    previous_count = cached["url_count"]
-                    print("Yasser prev:", previous_count, "Nezar Now:", current_count)
-                    if current_count > previous_count:
-                        status = "running"
-                    else:
-                        status = "idle"
-                else:
-                    status = "idle"
+            status = "idle" if time_diff <= 10 else "not active"
 
             item = {
                 "node_id": node_id,
@@ -124,7 +106,6 @@ def get_status():
                 "status": status
             }
 
-            # Optional: threads_info shown for visual purposes only
             if detailed:
                 cached = last_known_counts.get(node_id)
                 if cached and "threads_info" in cached:
@@ -136,42 +117,66 @@ def get_status():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
-        try:
-            cursor.close()
-            db.close()
-        except:
-            pass
+        cursor.close()
+        db.close()
 
-# ========== 🔎 SEARCH ==========
+# ================= SEARCH (TF-IDF) =================
 @app.route('/api/search', methods=['GET'])
 def search_keyword():
-    keyword = request.args.get('keyword', '').strip().lower()
-    if not keyword:
+    query = request.args.get('keyword', '').strip().lower()
+    if not query:
         return jsonify({'error': 'Keyword is required'}), 400
 
     try:
         db = get_db()
-        cursor = db.cursor()
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT url, content FROM indexed_pages")
+        pages = cursor.fetchall()
 
-        sql = "SELECT urls FROM keyword_index WHERE keyword = %s"
-        cursor.execute(sql, (keyword,))
-        row = cursor.fetchone()
+        urls = []
+        docs = []
+        for page in pages:
+            text = page["content"]
+            if text and text.strip():
+                urls.append(page["url"])
+                docs.append(text)
 
-        if row:
-            urls = json.loads(row[0])
-            return jsonify({'keyword': keyword, 'urls': urls})
-        else:
-            return jsonify({'keyword': keyword, 'urls': []})
+        if not docs:
+            return jsonify({'keyword': query, 'urls': []})
+
+        # Tokenize and clean
+        def tokenize(text):
+            tokens = word_tokenize(text.lower())
+            return ' '.join([w for w in tokens if w.isalnum() and w not in stop_words])
+
+        clean_docs = [tokenize(doc) for doc in docs]
+        clean_query = tokenize(query)
+
+        # TF-IDF vectorization
+        vectorizer = TfidfVectorizer()
+        doc_vectors = vectorizer.fit_transform(clean_docs + [clean_query])
+        cosine_scores = cosine_similarity(doc_vectors[-1], doc_vectors[:-1]).flatten()
+
+        # Match and sort
+        results = sorted(zip(urls, cosine_scores), key=lambda x: x[1], reverse=True)
+        filtered = [url for url, score in results if score > 0.05][:20]
+        return jsonify({'keyword': query, 'urls': filtered})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
-        try:
-            cursor.close()
-            db.close()
-        except:
-            pass
+        cursor.close()
+        db.close()
 
-# ========== 🌐 CRAWL ==========
+# ================= CRAWL =================
+def adjust_url(url):
+    if not url.startswith('http'):
+        url = 'https://' + url
+    return url
+
+def is_valid_url(string):
+    url_pattern = re.compile(r'^(https?://)?([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(/.*)?$')
+    return bool(url_pattern.match(string))
+
 @app.route('/api/crawl', methods=['POST'])
 def submit_url():
     data = request.get_json()
@@ -199,7 +204,7 @@ def submit_url():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ========== HEALTH ==========
+# ================= HEALTH =================
 @app.route('/ping', methods=['GET'])
 def ping():
     return "pong", 200
