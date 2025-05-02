@@ -43,7 +43,7 @@ def update_keyword_index():
             print(f"[MONITOR] Failed inserting {keyword}: {e}")
 
     db.commit()
-    print("[MONITOR] Keyword inverted index updated.")
+    print("[MONITOR] ✅ Keyword inverted index updated.")
 
 def get_last_change_signature():
     """Return a quick signature of the indexed_pages content (count + max id)."""
@@ -69,7 +69,7 @@ def monitor_index(interval=3):
 
             time.sleep(interval)
         except Exception as e:
-            print(f"[MONITOR] Error: {e}")
+            print(f"[MONITOR] ⚠️ Error: {e}")
             time.sleep(interval)
 
 if __name__ == "__main__":
