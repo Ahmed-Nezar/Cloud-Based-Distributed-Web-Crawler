@@ -73,7 +73,7 @@ def crawl_url():
             response = sqs.receive_message(
                 QueueUrl=crawler_queue_url,
                 MaxNumberOfMessages=1,
-                WaitTimeSeconds=10
+                WaitTimeSeconds=3
             )
 
             if 'Messages' not in response:
