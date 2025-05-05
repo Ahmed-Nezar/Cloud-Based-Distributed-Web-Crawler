@@ -2,7 +2,7 @@ from flask import Flask, request, render_template_string, jsonify
 import requests
 
 app = Flask(__name__)
-MASTER_SERVER = "http://56.228.15.200:5000"
+MASTER_SERVER = "http://16.16.207.18:5000"
 
 # In-memory store to track previous URL count
 prev_url_counts = {}
@@ -45,6 +45,15 @@ HTML_TEMPLATE = """
           <h5>🌐 Submit URL</h5>
           <input id="crawl-url" class="form-control mb-2" placeholder="Enter URL..." />
           <input id="crawl-depth" type="number" min="0" max="5" value="2" class="form-control mb-2" placeholder="Max Depth" />
+          <!-- 🆕 Domain Restriction Radio -->
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="domainLimit" id="domainYes" value="true" checked>
+            <label class="form-check-label" for="domainYes">Restrict to original domain</label>
+          </div>
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="radio" name="domainLimit" id="domainNo" value="false">
+            <label class="form-check-label" for="domainNo">No restriction</label>
+          </div>
           <button id="crawl-submit" class="btn btn-primary w-100">Submit</button>
           <div id="crawl-message" class="mt-2 text-info"></div>
         </div>
@@ -77,16 +86,23 @@ HTML_TEMPLATE = """
   <script>
     let prevCounts = {};
 
-    function renderThreads(threads_info) {
+    function renderThreads(threads_info, nodeStatus) {
       if (!Array.isArray(threads_info)) return "";
       return threads_info.map(t => {
         const status = (t.status || "").toLowerCase();
         let cls = "circle-unknown";
-        if (status.includes("crawling") || status.includes("indexing")) cls = "circle-running";
-        else if (status.includes("idle") || status.includes("waiting")) cls = "circle-idle";
+
+        if (nodeStatus === "not active") {
+          cls = "circle-unknown"; // whole node is down
+        } else if (status.includes("crawling") || status.includes("indexing")) {
+          cls = "circle-running";
+        } else if (status.includes("idle") || status.includes("waiting")) {
+          cls = "circle-idle";
+        }
+
         return `<span class="thread-circle ${cls}" title="${t.status}"></span>`;
       }).join('');
-    }
+     }
 
     function renderPanel(data, targetId, detailed) {
       let html = `
@@ -129,7 +145,7 @@ HTML_TEMPLATE = """
                     `<td>${badge}</td>` +
                     `<td>${current}</td>` +
                     `<td>${row.last_seen}</td>` +
-                    (detailed ? `<td>${renderThreads(row.threads_info)}</td>` : '') +
+                    (detailed ? `<td>${renderThreads(row.threads_info, row.status.toLowerCase())}</td>` : '') +
                   '</tr>';
         });
       } else {
@@ -161,12 +177,15 @@ HTML_TEMPLATE = """
       $("#crawl-submit").click(function () {
         const url = $("#crawl-url").val().trim();
         const depth = $("#crawl-depth").val();
+        const domainRestricted = $("input[name='domainLimit']:checked").val() === "true";
+
         if (!url) return $("#crawl-message").text("Please enter a URL.");
+
         $.ajax({
           url: "/crawl",
           method: "POST",
           contentType: "application/json",
-          data: JSON.stringify({ url, max_depth: depth }),
+          data: JSON.stringify({ url, max_depth: depth, domain_restricted: domainRestricted }),
           success: (res) => $("#crawl-message").text(res.message),
           error: (xhr) => {
             const msg = xhr.responseJSON?.error || "Failed to submit URL.";
@@ -174,6 +193,8 @@ HTML_TEMPLATE = """
           },
         });
       });
+
+
 
       $("#search-submit").click(function () {
         const keyword = $("#search-keyword").val().trim();
@@ -234,4 +255,4 @@ def crawl():
         return jsonify({'error': 'Failed to contact master.'}), 500
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5050, debug=True)
+    app.run(host='0.0.0.0', port=5050, debug=False)
