@@ -29,22 +29,20 @@ NODE_IP = get_private_ip()
 # Globals
 urls_indexed = 0
 active_threads = 0
-thread_status_map = {}  # thread_name -> status
+thread_status_map = {}
 lock = threading.Lock()
 stop_event = threading.Event()
 
 # AWS SQS setup
 sqs = boto3.client('sqs', region_name='eu-north-1')
-indexer_queue_url = 'https://sqs.eu-north-1.amazonaws.com/441832714601/IndexerQueue.fifo'
+indexer_queue_url = 'https://sqs.eu-north-1.amazonaws.com/441832714601/IndexerQueueStandard'
 
-# MySQL setup
-db = mysql.connector.connect(
-    host="172.31.28.123",
-    user="Admin",
-    password="1234",
-    database="INDEXER"
-)
-db_cursor = db.cursor()
+# Clean HTML
+def clean_html(html):
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style"]):
+        tag.decompose()
+    return soup.get_text(separator=" ", strip=True)
 
 # 🔁 Heartbeat
 def send_heartbeat():
@@ -62,17 +60,10 @@ def send_heartbeat():
                 }
             requests.post(f"{MASTER_API}/api/heartbeat", json=payload, timeout=3)
         except Exception as e:
-            print(f"[INDEXER] Heartbeat failed: {e}")
+            print(f"[INDEXER1][HEARTBEAT] Failed: {e}")
         time.sleep(2)
 
-# Clean HTML
-def clean_html(html):
-    soup = BeautifulSoup(html, "html.parser")
-    for tag in soup(["script", "style"]):
-        tag.decompose()
-    return soup.get_text(separator=" ", strip=True)
-
-# Worker logic
+# 🧠 Worker logic
 def process_message(index):
     global urls_indexed, active_threads
     thread_name = threading.current_thread().name
@@ -93,7 +84,7 @@ def process_message(index):
                 thread_status_map[thread_name] = "Processing message..."
 
             try:
-                data = eval(message['Body'])  # ⚠️ Replace in production
+                data = eval(message['Body'])  # Replace with json.loads in production
                 url = data.get('url')
                 raw_html = data.get('text')
 
@@ -103,47 +94,55 @@ def process_message(index):
 
                     cleaned_text = clean_html(raw_html)
 
-                    with lock:
-                        urls_indexed += 1
+                    # 🔄 Safe DB connection block
+                    try:
+                        db = mysql.connector.connect(
+                            host="172.31.28.123",
+                            user="Admin",
+                            password="1234",
+                            database="INDEXER"
+                        )
+                        db.ping(reconnect=True)
+                        cursor = db.cursor()
+                        cursor.execute("""
+                            INSERT INTO indexed_pages (url, content, indexed_obj_id)
+                            VALUES (%s, %s, %s)
+                            ON DUPLICATE KEY UPDATE
+                                content = VALUES(content),
+                                indexed_obj_id = VALUES(indexed_obj_id)
+                        """, (url, cleaned_text, "dummy-id"))
+                        db.commit()
+                        cursor.close()
+                        db.close()
 
-                    sql = """
-                        INSERT INTO indexed_pages (url, content, indexed_obj_id)
-                        VALUES (%s, %s, %s)
-                        ON DUPLICATE KEY UPDATE
-                            content = VALUES(content),
-                            indexed_obj_id = VALUES(indexed_obj_id)
-                    """
-                    db_cursor.execute(sql, (url, cleaned_text, "dummy-id"))
-                    db.commit()
+                        with lock:
+                            urls_indexed += 1
+                    except Exception as db_err:
+                        print(f"[INDEXER1][DB ERROR] {db_err}")
 
                 sqs.delete_message(
                     QueueUrl=indexer_queue_url,
                     ReceiptHandle=message['ReceiptHandle']
                 )
             except Exception as e:
-                print(f"[INDEXER] Failed to process: {e}")
+                print(f"[INDEXER1] Failed to process: {e}")
             finally:
                 with lock:
                     active_threads -= 1
                     thread_status_map[thread_name] = "Idle"
 
     except Exception as outer:
-        print(f"[INDEXER] SQS error: {outer}")
+        print(f"[INDEXER1][SQS ERROR] {outer}")
 
-# Indexer worker
+# 👷 Thread worker
 def index_worker(index):
     while not stop_event.is_set():
         process_message(index)
 
-# Load index (not used now)
-def load_index():
-    print("[INDEXER] No local content index loaded (using DB only).")
-    return {}
-
-# Entry point
+# 🔄 Entry point
 def main():
-    print("[INDEXER] Starting...")
-    index = load_index()
+    print("[INDEXER1] Starting...")
+    index = {}  # Placeholder
 
     threads = []
     for i in range(2):
@@ -164,9 +163,7 @@ def main():
         for t in threads:
             t.join()
 
-    db_cursor.close()
-    db.close()
-    print("[INDEXER] Clean exit.")
+    print("[INDEXER1] Clean exit.")
 
 if __name__ == "__main__":
     main()
