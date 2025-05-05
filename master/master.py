@@ -21,7 +21,7 @@ app = Flask(__name__)
 
 # AWS SQS Setup
 sqs = boto3.client('sqs', region_name='eu-north-1')
-task_queue_url = 'https://sqs.eu-north-1.amazonaws.com/441832714601/TaskQueue.fifo'
+task_queue_url = 'https://sqs.eu-north-1.amazonaws.com/441832714601/TaskQueueStandard'
 
 # Local heartbeat cache
 last_known_counts = {}
@@ -134,6 +134,37 @@ def crawler1_status():
         return jsonify({"active": False})
     except:
         return jsonify({"active": False})
+
+# Crawler-2 status update
+@app.route("/api/crawler2-status", methods=["GET"])
+def crawler2_status():
+    try:
+        for node_id, info in last_known_counts.items():
+            if "ip-172-31-10-236" in node_id.lower():  # or some known name
+                time_diff = (datetime.utcnow() - info["last_seen"]).total_seconds()
+                if time_diff <= 4:
+                    return jsonify({"active": True})
+                else:
+                    return jsonify({"active": False})
+        return jsonify({"active": False})
+    except:
+        return jsonify({"active": False})
+
+
+# Indexer-1 status update
+@app.route("/api/indexer1-status", methods=["GET"])
+def indexer1_status():
+    try:
+        for node_id, info in last_known_counts.items():
+            if "ip-172-31-29-127" in node_id.lower():  # Adjust as needed
+                time_diff = (datetime.utcnow() - info["last_seen"]).total_seconds()
+                return jsonify({"active": time_diff <= 5})
+        return jsonify({"active": False})
+    except:
+        return jsonify({"active": False})
+
+
+
 # ================= 🔎 SEARCH (TF-IDF) =================
 @app.route('/api/search', methods=['GET'])
 def search_keyword():
@@ -196,6 +227,7 @@ def submit_url():
     data = request.get_json()
     url = data.get('url', '').strip()
     max_depth = data.get('max_depth', 2)
+    restrict_domain = data.get('domain_restricted', False)
 
     try:
         max_depth = int(max_depth)
@@ -208,13 +240,24 @@ def submit_url():
     url = adjust_url(url)
 
     try:
+        # domain restriction handled here
+        domain_prefix = url.split('/')[0] + '//' + url.split('/')[2] if restrict_domain else None
+
+        payload = {
+            "url": url,
+            "depth": 0,
+            "max_depth": max_depth,
+            "restrict_domain": restrict_domain,
+            "domain_prefix": domain_prefix
+        }
+
         sqs.send_message(
             QueueUrl=task_queue_url,
-            MessageBody=json.dumps({"url": url, "depth": 0, "max_depth": max_depth}),
-            MessageGroupId='1',
-            MessageDeduplicationId=str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{url}:{max_depth}"))
+            MessageBody=json.dumps(payload)
         )
-        return jsonify({'message': f"URL '{url}' submitted for crawling with max depth {max_depth}."}), 200
+        return jsonify({
+            'message': f"URL '{url}' submitted for crawling with max depth {max_depth}. Domain restriction: {restrict_domain}"
+        }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -224,4 +267,4 @@ def ping():
     return "pong", 200
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=False)
