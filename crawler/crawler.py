@@ -33,8 +33,8 @@ stop_event = threading.Event()
 
 # AWS SQS
 sqs = boto3.client('sqs', region_name='eu-north-1')
-crawler_queue_url = 'https://sqs.eu-north-1.amazonaws.com/441832714601/TaskQueue.fifo'
-indexer_queue_url = 'https://sqs.eu-north-1.amazonaws.com/441832714601/IndexerQueue.fifo'
+crawler_queue_url = 'https://sqs.eu-north-1.amazonaws.com/441832714601/TaskQueueStandard'
+indexer_queue_url = 'https://sqs.eu-north-1.amazonaws.com/441832714601/IndexerQueueStandard'
 
 # HEARTBEAT
 def send_heartbeat():
@@ -85,6 +85,8 @@ def crawl_url():
                     url = body.get('url')
                     depth = body.get('depth', 0)
                     max_depth = body.get('max_depth', 0)
+                    restrict_domain = body.get('restrict_domain', False)
+                    domain_prefix = body.get('domain_prefix', '')
 
                     with lock:
                         thread_status_map[thread_name] = f"Crawling {url} (depth {depth})"
@@ -106,14 +108,16 @@ def crawl_url():
                     base_url = url
                     links = [urljoin(base_url, a['href']) for a in soup.find_all('a', href=True)]
 
+                    # ✅ Apply domain restriction
+                    if restrict_domain:
+                        links = [link for link in links if link.startswith(domain_prefix)]
+
                     if text.strip():
                         result = {'url': url, 'text': text, 'links': links}
                         dedup_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{url}:{depth}"))  # 👈 depth-aware
                         sqs.send_message(
                             QueueUrl=indexer_queue_url,
-                            MessageBody=str(result),
-                            MessageGroupId='1',
-                            MessageDeduplicationId=dedup_id
+                            MessageBody=str(result)
                         )
 
                     with lock:
@@ -123,9 +127,7 @@ def crawl_url():
                         for link in links:
                             sqs.send_message(
                                 QueueUrl=crawler_queue_url,
-                                MessageBody=json.dumps({"url": link, "depth": depth + 1, "max_depth": max_depth}),
-                                MessageGroupId='1',
-                                MessageDeduplicationId=str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{link}:{depth+1}"))
+                                MessageBody=json.dumps({"url": link, "depth": depth + 1, "max_depth": max_depth,"restrict_domain": restrict_domain,"domain_prefix": domain_prefix }),
                             )
 
                 except Exception as e:
@@ -155,4 +157,4 @@ def start_crawlers(num_threads):
         t.join()
 
 if __name__ == "__main__":
-    start_crawlers(num_threads=5)
+    start_crawlers(num_threads=3)
