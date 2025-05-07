@@ -120,50 +120,40 @@ def get_status():
         cursor.close()
         db.close()
 
-# Crawler-1 status update
+# ================= 🔒 STATIC FALLBACK ENDPOINTS =================
+
 @app.route("/api/crawler1-status", methods=["GET"])
 def crawler1_status():
     try:
         for node_id, info in last_known_counts.items():
-            if "ip-172-31-29-60" in node_id.lower():  # or some known name
+            if "ip-172-31-29-60" in node_id.lower():
                 time_diff = (datetime.utcnow() - info["last_seen"]).total_seconds()
-                if time_diff <= 4:
-                    return jsonify({"active": True})
-                else:
-                    return jsonify({"active": False})
+                return jsonify({"active": time_diff <= 4})
         return jsonify({"active": False})
     except:
         return jsonify({"active": False})
 
-# Crawler-2 status update
 @app.route("/api/crawler2-status", methods=["GET"])
 def crawler2_status():
     try:
         for node_id, info in last_known_counts.items():
-            if "ip-172-31-10-236" in node_id.lower():  # or some known name
+            if "ip-172-31-10-236" in node_id.lower():
                 time_diff = (datetime.utcnow() - info["last_seen"]).total_seconds()
-                if time_diff <= 4:
-                    return jsonify({"active": True})
-                else:
-                    return jsonify({"active": False})
+                return jsonify({"active": time_diff <= 4})
         return jsonify({"active": False})
     except:
         return jsonify({"active": False})
 
-
-# Indexer-1 status update
 @app.route("/api/indexer1-status", methods=["GET"])
 def indexer1_status():
     try:
         for node_id, info in last_known_counts.items():
-            if "ip-172-31-29-127" in node_id.lower():  # Adjust as needed
+            if "ip-172-31-29-127" in node_id.lower():
                 time_diff = (datetime.utcnow() - info["last_seen"]).total_seconds()
                 return jsonify({"active": time_diff <= 5})
         return jsonify({"active": False})
     except:
         return jsonify({"active": False})
-
-
 
 # ================= 🔎 SEARCH (TF-IDF) =================
 @app.route('/api/search', methods=['GET'])
@@ -189,7 +179,6 @@ def search_keyword():
         if not docs:
             return jsonify({'keyword': query, 'urls': []})
 
-        # Tokenize and clean
         def tokenize(text):
             tokens = word_tokenize(text.lower())
             return ' '.join([w for w in tokens if w.isalnum() and w not in stop_words])
@@ -197,12 +186,10 @@ def search_keyword():
         clean_docs = [tokenize(doc) for doc in docs]
         clean_query = tokenize(query)
 
-        # TF-IDF vectorization
         vectorizer = TfidfVectorizer()
         doc_vectors = vectorizer.fit_transform(clean_docs + [clean_query])
         cosine_scores = cosine_similarity(doc_vectors[-1], doc_vectors[:-1]).flatten()
 
-        # Match and sort
         results = sorted(zip(urls, cosine_scores), key=lambda x: x[1], reverse=True)
         filtered = [url for url, score in results if score > 0.05][:20]
         return jsonify({'keyword': query, 'urls': filtered})
@@ -240,7 +227,6 @@ def submit_url():
     url = adjust_url(url)
 
     try:
-        # domain restriction handled here
         domain_prefix = url.split('/')[0] + '//' + url.split('/')[2] if restrict_domain else None
 
         payload = {
