@@ -52,7 +52,7 @@ def update_keyword_index():
             except Exception as e:
                 print(f"[MONITOR] Failed inserting {keyword}: {e}")
         db.commit()
-        print("[MONITOR] ✅ Keyword inverted index updated.")
+        print("[MONITOR] Keyword inverted index updated.")
     except Exception as e:
         print(f"[MONITOR] Error in update_keyword_index: {e}")
         reconnect_db()
@@ -76,7 +76,7 @@ def reconnect_db():
         pass
     db = connect_db()
     db_cursor = db.cursor()
-    print("[MONITOR] 🔁 Reconnected to MySQL")
+    print("[MONITOR]  Reconnected to MySQL")
 
 # === Monitor Loop
 def monitor_index(interval=3):

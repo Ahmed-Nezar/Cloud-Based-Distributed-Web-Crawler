@@ -125,7 +125,7 @@ HTML_TEMPLATE = """
           const current = row.url_count || 0;
           const previous = prevCounts[nodeId] || 0;
 
-          // 👇 Detect running on client side
+          // Detect running on client side
           let statusLabel = row.status;
           if (statusLabel !== "not active" && current > previous) {
             statusLabel = "running";

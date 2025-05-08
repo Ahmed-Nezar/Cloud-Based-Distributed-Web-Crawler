@@ -129,7 +129,7 @@ def crawl_url():
                 text = soup.get_text()
                 links = [urljoin(base_url, a['href']) for a in soup.find_all('a', href=True)]
 
-                # ✅ Apply domain restriction
+                # Apply domain restriction
                 if restrict_domain:
                     links = [link for link in links if link.startswith(domain_prefix)]
 

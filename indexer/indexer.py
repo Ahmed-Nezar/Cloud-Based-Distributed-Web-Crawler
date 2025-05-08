@@ -44,7 +44,7 @@ def clean_html(html):
         tag.decompose()
     return soup.get_text(separator=" ", strip=True)
 
-# 🔁 Heartbeat
+# Heartbeat
 def send_heartbeat():
     while not stop_event.is_set():
         try:
@@ -63,7 +63,7 @@ def send_heartbeat():
             print(f"[INDEXER1][HEARTBEAT] Failed: {e}")
         time.sleep(2)
 
-# 🧠 Worker logic
+# Worker logic
 def process_message(index):
     global urls_indexed, active_threads
     thread_name = threading.current_thread().name
@@ -94,7 +94,7 @@ def process_message(index):
 
                     cleaned_text = clean_html(raw_html)
 
-                    # 🔄 Safe DB connection block
+                    # Safe DB connection block
                     try:
                         db = mysql.connector.connect(
                             host="172.31.28.123",
@@ -134,12 +134,12 @@ def process_message(index):
     except Exception as outer:
         print(f"[INDEXER1][SQS ERROR] {outer}")
 
-# 👷 Thread worker
+# Thread worker
 def index_worker(index):
     while not stop_event.is_set():
         process_message(index)
 
-# 🔄 Entry point
+# Entry point
 def main():
     print("[INDEXER1] Starting...")
     index = {}  # Placeholder

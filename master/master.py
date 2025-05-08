@@ -34,7 +34,7 @@ def get_db():
         database="INDEXER"
     )
 
-# ================= 🔁 HEARTBEAT =================
+# ================= HEARTBEAT =================
 @app.route('/api/heartbeat', methods=['POST'])
 def receive_heartbeat():
     data = request.get_json()
@@ -73,7 +73,7 @@ def receive_heartbeat():
         cursor.close()
         db.close()
 
-# ================= 📊 STATUS =================
+# ================= STATUS =================
 @app.route('/api/status', methods=['GET'])
 def get_status():
     detailed = request.args.get("detailed", "false").lower() == "true"
@@ -120,7 +120,7 @@ def get_status():
         cursor.close()
         db.close()
 
-# ================= 🔒 STATIC FALLBACK ENDPOINTS =================
+# ================= STATIC FALLBACK ENDPOINTS =================
 
 @app.route("/api/crawler1-status", methods=["GET"])
 def crawler1_status():
@@ -155,7 +155,7 @@ def indexer1_status():
     except:
         return jsonify({"active": False})
 
-# ================= 🔎 SEARCH (TF-IDF) =================
+# ================= SEARCH (TF-IDF) =================
 @app.route('/api/search', methods=['GET'])
 def search_keyword():
     query = request.args.get('keyword', '').strip().lower()
@@ -199,7 +199,7 @@ def search_keyword():
         cursor.close()
         db.close()
 
-# ================= 🌐 CRAWL =================
+# ================= CRAWL =================
 def adjust_url(url):
     if not url.startswith('http'):
         url = 'https://' + url
@@ -247,7 +247,7 @@ def submit_url():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ================= 🩺 HEALTH =================
+# ================= HEALTH =================
 @app.route('/ping', methods=['GET'])
 def ping():
     return "pong", 200

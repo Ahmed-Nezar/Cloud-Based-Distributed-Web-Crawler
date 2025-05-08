@@ -58,7 +58,7 @@ def send_heartbeat():
 
         time.sleep(2)
 
-# 🕸️ Crawl Logic
+# Crawl Logic
 def crawl_url():
     global urls_crawled, active_threads
 
@@ -141,7 +141,7 @@ def crawl_url():
                 active_threads -= 1
 
         print("[DEBUG] Incrementing URL count:", urls_crawled)
-# 🚀 Launch Threads
+# Launch Threads
 def start_crawlers(num_threads):
     threads = []
 
