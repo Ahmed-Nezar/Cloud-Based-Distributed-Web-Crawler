@@ -174,7 +174,7 @@ nltk.download('stopwords')
 ---
 
 ## Architecture Diagram
-![image](https://github.com/user-attachments/assets/0a12be94-08ed-4259-96ba-e46cb339b294)
+![architecture_v4_placeholder](https://github.com/user-attachments/assets/7417a088-0fc7-432f-9844-6f9f2aed296e)
 
 
 ## Features Summary
